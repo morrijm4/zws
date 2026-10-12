@@ -1,44 +1,144 @@
 //! [ZWS] Zig Web Server
 const std = @import("std");
-const request = @import("request.zig");
-const response = @import("response.zig");
+const http = @import("http.zig");
+const plug = @import("plugin.zig");
 const Io = std.Io;
+const net = Io.net;
 const Allocator = std.mem.Allocator;
-const IpAddress = Io.net.IpAddress;
-const Stream = Io.net.Stream;
+const IpAddress = net.IpAddress;
+const Stream = net.Stream;
 
-const log = std.log.scoped(.zws);
+pub const App = @This();
+pub const Request = http.Request;
+pub const Response = http.Response;
+pub const Error = http.Error;
+pub const Plugin = plug.Plugin;
+pub const static_assets = @import("static_assets.zig");
 
-pub const HTTP = @This();
-
-ip: IpAddress,
+gpa: Allocator,
 worker: Worker,
 
-const StartError = IpAddress.ListenError || Io.net.Server.AcceptError;
+pub fn init(gpa: Allocator) Allocator.Error!App {
+    return .{
+        .gpa = gpa,
+        .worker = try .init(gpa, 1024 * 16), // 16 KB
+    };
+}
 
-pub fn start(http: *HTTP, io: Io) StartError!noreturn {
-    var server = try http.ip.listen(io, .{ .reuse_address = true });
+const ListenError =
+    IpAddress.ListenError ||
+    IpAddress.ParseLiteralError ||
+    net.Server.AcceptError;
+
+pub fn listen(app: *App, io: Io, address: []const u8) ListenError!noreturn {
+    const ip = try IpAddress.parseLiteral(address);
+    var server = try ip.listen(io, .{ .reuse_address = true });
 
     while (true) {
         const stream = try server.accept(io);
-        http.worker.serve(io, stream);
+        app.worker.serve(io, stream);
     }
 }
 
+pub fn use(app: *App, plugin: Plugin) Allocator.Error!void {
+    try app.worker.plugins.append(app.gpa, plugin);
+}
+
+pub fn get(app: *App, path: []const u8, handler: Handler) Worker.AddRouteError!void {
+    try app.worker.addRoute(.GET, path, handler);
+}
+
+pub fn post(app: *App, path: []const u8, handler: Handler) Worker.AddRouteError!void {
+    try app.worker.addRoute(.POST, path, handler);
+}
+pub fn put(app: *App, path: []const u8, handler: Handler) Worker.AddRouteError!void {
+    try app.worker.addRoute(.PUT, path, handler);
+}
+
+pub fn patch(app: *App, path: []const u8, handler: Handler) Worker.AddRouteError!void {
+    try app.worker.addRoute(.PATCH, path, handler);
+}
+
+pub fn delete(app: *App, path: []const u8, handler: Handler) Worker.AddRouteError!void {
+    try app.worker.addRoute(.DELETE, path, handler);
+}
+
+const Handler = *const fn (Io, Allocator, Request) anyerror!Response;
+
 const Worker = struct {
-    buffer: []u8,
+    arena: std.heap.FixedBufferAllocator,
 
-    const Options = struct {
-        buffer_size: u32,
-    };
+    gets: std.StringHashMap(Handler),
+    heads: std.StringHashMap(Handler),
+    posts: std.StringHashMap(Handler),
+    puts: std.StringHashMap(Handler),
+    patchs: std.StringHashMap(Handler),
+    deletes: std.StringHashMap(Handler),
+    options: std.StringHashMap(Handler),
+    connects: std.StringHashMap(Handler),
 
-    fn init(gpa: Allocator, options: Worker.Options) Allocator.Error!Worker {
+    plugins: std.ArrayList(plug.Plugin),
+
+    fn init(gpa: Allocator, buffer_size: u32) Allocator.Error!Worker {
+        const buffer = try gpa.alloc(u8, buffer_size);
         return .{
-            .buffer = try gpa.alloc(u8, options.buffer_size),
+            .arena = .init(buffer),
+
+            .gets = .init(gpa),
+            .heads = .init(gpa),
+            .posts = .init(gpa),
+            .puts = .init(gpa),
+            .patchs = .init(gpa),
+            .deletes = .init(gpa),
+            .options = .init(gpa),
+            .connects = .init(gpa),
+
+            .plugins = .empty,
         };
     }
 
+    fn deinit(worker: *Worker, gpa: Allocator) void {
+        gpa.free(worker.arena.buffer);
+        worker.gets.deinit();
+        worker.heads.deinit(gpa);
+        worker.posts.deinit(gpa);
+        worker.puts.deinit(gpa);
+        worker.patchs.deinit(gpa);
+        worker.deletes.deinit(gpa);
+        worker.options.deinit(gpa);
+        worker.connects.deinit(gpa);
+    }
+
+    const AddRouteError = Allocator.Error;
+
+    fn addRoute(
+        worker: *Worker,
+        method: http.Method,
+        path: []const u8,
+        handler: Handler,
+    ) AddRouteError!void {
+        try switch (method) {
+            .GET => worker.gets.put(path, handler),
+            .HEAD => worker.heads.put(path, handler),
+            .POST => worker.posts.put(path, handler),
+            .PUT => worker.puts.put(path, handler),
+            .PATCH => worker.patchs.put(path, handler),
+            .DELETE => worker.deletes.put(path, handler),
+            .OPTIONS => worker.options.put(path, handler),
+            .CONNECT => worker.connects.put(path, handler),
+        };
+    }
+
+    fn addPlugin(
+        worker: *Worker,
+        gpa: Allocator,
+        plugin: plug.Plugin(*anyopaque),
+    ) Allocator.Error!void {
+        try worker.plugins.append(gpa, plugin);
+    }
+
     fn serve(worker: *Worker, io: Io, stream: Stream) void {
+        defer worker.arena.reset();
         defer stream.close(io);
 
         var req_buffer: [1024 * 4]u8 = undefined;
@@ -49,58 +149,38 @@ const Worker = struct {
         const reader = &stream_reader.interface;
         const writer = &stream_writer.interface;
 
-        var arena = std.heap.FixedBufferAllocator.init(worker.buffer);
-        const gpa = arena.allocator();
+        const gpa = worker.arena.allocator();
 
-        const req = request.parse(gpa, reader, 1024 * 4) catch |e| {
-            arena.reset();
-            const res = switch (e) {
-                error.BadRequest => response.init(gpa, .BadRequest),
-                else => response.init(gpa, .InternalServerError),
-            } catch {
-                return fatal(.oom);
+        const req = Request.parse(gpa, reader, 1024 * 4) catch |err| {
+            return worker.onError(err, writer);
+        };
+
+        const handler = switch (req.method) {
+            .GET => worker.gets.get(req.path.buf),
+            .HEAD => worker.heads.get(req.path.buf),
+            .POST => worker.posts.get(req.path.buf),
+            .PUT => worker.puts.get(req.path.buf),
+            .PATCH => worker.patchs.get(req.path.buf),
+            .DELETE => worker.deletes.get(req.path.buf),
+            .OPTIONS => worker.options.get(req.path.buf),
+            .CONNECT => worker.connects.get(req.path.buf),
+        };
+
+        if (handler) |handle| {
+            const res = handle(io, gpa, req) catch |err| {
+                return worker.onError(err, writer);
             };
 
-            res.print(writer) catch return fatal(.writing);
-            return writer.flush() catch return fatal(.flushing);
-        };
-        req.print();
+            return res.send(writer);
+        }
 
-        var res = response.init(gpa, .OK) catch return fatal(.oom);
-        const body = "Hello, world!\n";
-        res.headers.put("Content-Length", "14") catch return fatal(.oom);
-        res.body = body;
-        res.print(writer) catch return fatal(.writing);
-        writer.flush() catch return fatal(.flushing);
+        worker.onError(http.Error.NotFound, writer);
     }
 
-    const Error = enum(u8) {
-        writing = 1,
-        flushing = 2,
-        oom = 3,
-    };
-
-    fn fatal(e: Worker.Error) void {
-        log.err("{s} {d}", .{ @tagName(e), @intFromEnum(e) });
+    fn onError(worker: *Worker, err: anyerror, w: *Io.Writer) void {
+        worker.arena.reset();
+        const gpa = worker.arena.allocator();
+        const res = Response.fromError(gpa, err);
+        return res.send(w);
     }
 };
-
-const InitError = Allocator.Error || error{
-    InvalidAddress,
-    InvalidPort,
-};
-
-const Options = struct {
-    address: []const u8,
-    buffer_size: u32 = 1024 * 16,
-};
-
-pub fn init(gpa: Allocator, options: Options) InitError!HTTP {
-    const ip = try Io.net.IpAddress.parseLiteral(options.address);
-    return .{
-        .ip = ip,
-        .worker = try .init(gpa, .{
-            .buffer_size = options.buffer_size,
-        }),
-    };
-}
