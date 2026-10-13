@@ -7,6 +7,9 @@ const Response = http.Response;
 
 pub const Plugin = struct {
     ctx: *anyopaque,
-    before: ?*const fn (*Request, *anyopaque) anyerror!void,
-    after: ?*const fn (Request, *Response, *anyopaque) anyerror!void,
+    before: ?Before,
+    after: ?After,
 };
+
+const Before = *const fn (*Request, *anyopaque) anyerror!void;
+const After = *const fn (Request, *Response, *anyopaque) anyerror!void;

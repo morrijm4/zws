@@ -3,19 +3,40 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const zws = @import("zws");
+const App = zws.App;
+const Request = zws.Request;
+const Response = zws.Response;
 
-fn handleIndex(io: Io, gpa: Allocator, req: zws.Request) Allocator.Error!zws.Response {
+var i: u32 = 0;
+
+fn counter(io: Io, gpa: Allocator, req: Request) anyerror!Response {
     _ = io;
     _ = req;
-    return zws.Response.init(gpa, .OK);
+    i += 1;
+
+    var res = try Response.init(gpa, .Ok);
+
+    res.body = try std.fmt.allocPrint(gpa, "{d}", .{i});
+    const len = try std.fmt.allocPrint(gpa, "{d}", .{res.body.len});
+    try res.headers.put("Content-Type", "text/plain");
+    try res.headers.put("Content-Length", len);
+
+    return res;
 }
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
 
-    var app = try zws.init(gpa);
-    try app.use(zws.static_assets.init());
-    try app.get("/", handleIndex);
+    var app = try App.init(gpa);
+
+    var ctx: zws.static_assets.Context = .{
+        .path = "/public",
+        .io = io,
+        .gpa = gpa,
+    };
+    try app.use(zws.static_assets.init(&ctx));
+    try app.get("/counter", counter);
+
     try app.listen(io, "127.0.0.1:3000");
 }

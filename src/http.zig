@@ -190,7 +190,7 @@ pub const Response = struct {
 
     const Code = enum(u16) {
         // Success
-        OK = 200,
+        Ok = 200,
 
         // Client error
         BadRequest = 400,
