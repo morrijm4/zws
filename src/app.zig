@@ -1,13 +1,12 @@
 const std = @import("std");
 const http = @import("http.zig");
-const plug = @import("plugin.zig");
+const plugin = @import("plugins/plugin.zig");
 const Io = std.Io;
 const net = Io.net;
 const Allocator = std.mem.Allocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const IpAddress = net.IpAddress;
 const Stream = net.Stream;
-const Plugin = plug.Plugin;
 const Request = http.Request;
 const Response = http.Response;
 const assert = std.debug.assert;
@@ -16,7 +15,7 @@ pub const App = @This();
 
 gpa: Allocator,
 handlers: Handlers,
-plugins: std.ArrayList(Plugin),
+plugins: std.ArrayList(plugin.Interface),
 worker_arenas: []FixedBufferAllocator,
 
 const Options = struct {
@@ -85,12 +84,12 @@ pub fn listen(app: *App, io: Io, address: []const u8) ListenError!noreturn {
 }
 const Worker = struct {
     arena: FixedBufferAllocator,
-    plugins: []const Plugin,
+    plugins: []const plugin.Interface,
     handlers: *Handlers,
 
     fn init(
         handlers: *Handlers,
-        plugins: []const Plugin,
+        plugins: []const plugin.Interface,
         arena: FixedBufferAllocator,
     ) Worker {
         return .{
@@ -119,9 +118,9 @@ const Worker = struct {
             return worker.onError(err).send(writer);
         };
 
-        for (worker.plugins) |plugin| {
-            if (plugin.before) |callback| {
-                callback(io, gpa, &req, plugin.userdata) catch |err| {
+        for (worker.plugins) |plug| {
+            if (plug.before) |callback| {
+                callback(io, gpa, &req, plug.userdata) catch |err| {
                     return worker.onError(err).send(writer);
                 };
             }
@@ -129,9 +128,9 @@ const Worker = struct {
 
         var res = worker.onRequest(io, req);
 
-        for (worker.plugins) |plugin| {
-            if (plugin.after) |callback| {
-                callback(io, gpa, req, &res, plugin.userdata) catch |err| {
+        for (worker.plugins) |plug| {
+            if (plug.after) |callback| {
+                callback(io, gpa, req, &res, plug.userdata) catch |err| {
                     return worker.onError(err).send(writer);
                 };
             }
@@ -167,8 +166,8 @@ const Worker = struct {
     }
 };
 
-pub fn use(app: *App, plugin: Plugin) Allocator.Error!void {
-    try app.plugins.append(app.gpa, plugin);
+pub fn use(app: *App, plug: plugin.Interface) Allocator.Error!void {
+    try app.plugins.append(app.gpa, plug);
 }
 
 pub fn get(

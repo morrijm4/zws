@@ -1,12 +1,13 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
+const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
 const zws = @import("zws");
 const App = zws.App;
 const Request = zws.Request;
 const Response = zws.Response;
-const static_assets = zws.static_assets;
+const assets = zws.assets;
 
 var i: u32 = 0;
 
@@ -32,12 +33,10 @@ pub fn main(init: std.process.Init) !void {
     const buf = try gpa.alloc(u8, 1024 * 1024 * 16); // 16 MB
     defer gpa.free(buf);
 
-    var arena = std.heap.FixedBufferAllocator.init(buf);
+    var arena = FixedBufferAllocator.init(buf);
 
     var app = try App.init(arena.allocator(), .{});
-
-    try app.use(static_assets.init("/public"));
+    try app.use(assets.init("/public"));
     try app.get("/counter", counter);
-
     try app.listen(io, "127.0.0.1:3000");
 }

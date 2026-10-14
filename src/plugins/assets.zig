@@ -1,6 +1,6 @@
 const std = @import("std");
-const plug = @import("plugin.zig");
-const http = @import("http.zig");
+const plugin = @import("plugin.zig");
+const http = @import("../http.zig");
 const Io = std.Io;
 const path = std.fs.path;
 const Allocator = std.mem.Allocator;
@@ -46,7 +46,7 @@ fn after(
     res.* = response;
 }
 
-pub fn init(comptime assets_path: []const u8) plug.Plugin {
+pub fn init(comptime assets_path: []const u8) plugin.Interface {
     return .{
         .userdata = @ptrCast(@constCast(&assets_path)),
         .before = null,

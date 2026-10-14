@@ -1,11 +1,11 @@
 const std = @import("std");
-const http = @import("http.zig");
+const http = @import("../http.zig");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const Request = http.Request;
 const Response = http.Response;
 
-pub const Plugin = struct {
+pub const Interface = struct {
     userdata: *anyopaque,
     before: ?Before,
     after: ?After,
