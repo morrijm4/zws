@@ -28,7 +28,12 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
 
-    var app = try App.init(gpa);
+    const buf = try gpa.alloc(u8, 1024 * 1024 * 16); // 16 MB
+    defer gpa.free(buf);
+
+    var arena = std.heap.FixedBufferAllocator.init(buf);
+
+    var app = try App.init(arena.allocator(), .{});
 
     var ctx: zws.static_assets.Context = .{
         .path = "/public",
