@@ -13,24 +13,25 @@ const assert = std.debug.assert;
 
 pub const App = @This();
 
+opts: Options,
 gpa: Allocator,
 handlers: Handlers,
 plugins: std.ArrayList(plugin.Interface),
 worker_arenas: []FixedBufferAllocator,
 
 const Options = struct {
-    client_max_url_size: u32 = 1024 * 2,
-    client_max_headers_size: u32 = 1024 * 8,
-    client_max_body_size: u32 = 1024 * 1024,
+    client_max_size_url: u32 = 1024 * 2,
+    client_max_size_headers: u32 = 1024 * 8,
+    client_max_size_body: u32 = 1024 * 1024,
     worker_arena_size: u32 = 1024 * 1024 * 2,
     workers: u32 = 1,
 };
 
 pub fn init(gpa: Allocator, opts: Options) Allocator.Error!App {
     const max_request_size =
-        opts.client_max_url_size +
-        opts.client_max_headers_size +
-        opts.client_max_body_size;
+        opts.client_max_size_url +
+        opts.client_max_size_headers +
+        opts.client_max_size_body;
 
     assert(opts.worker_arena_size >= max_request_size);
 
@@ -42,6 +43,7 @@ pub fn init(gpa: Allocator, opts: Options) Allocator.Error!App {
     }
 
     return .{
+        .opts = opts,
         .gpa = gpa,
         .plugins = .empty,
         .worker_arenas = arenas,
@@ -79,7 +81,7 @@ pub fn listen(app: *App, io: Io, address: []const u8) ListenError!noreturn {
 
     while (true) {
         const stream = try server.accept(io);
-        worker.serve(io, stream);
+        worker.serve(io, stream, app.opts);
     }
 }
 const Worker = struct {
@@ -99,7 +101,7 @@ const Worker = struct {
         };
     }
 
-    fn serve(worker: *Worker, io: Io, stream: Stream) void {
+    fn serve(worker: *Worker, io: Io, stream: Stream, opts: Options) void {
         defer worker.arena.reset();
         defer stream.close(io);
 
@@ -113,8 +115,13 @@ const Worker = struct {
 
         const gpa = worker.arena.allocator();
 
-        // TODO: Uses the limit options
-        var req = Request.parse(gpa, reader, 1024 * 4) catch |err| {
+        const limits: Request.Limits = .{
+            .max_size_url = opts.client_max_size_url,
+            .max_size_headers = opts.client_max_size_headers,
+            .max_size_body = opts.client_max_size_body,
+        };
+
+        var req = Request.parse(gpa, reader, limits) catch |err| {
             return worker.onError(err).send(writer);
         };
 

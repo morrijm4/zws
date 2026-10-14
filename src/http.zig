@@ -31,14 +31,21 @@ pub const Request = struct {
         };
     }
 
+    pub const Limits = struct {
+        max_size_url: u32,
+        max_size_headers: u32,
+        max_size_body: u32,
+    };
+
     const ParseError =
         Allocator.Error ||
         Io.Reader.Error ||
         Io.Reader.DelimiterError ||
         Error;
 
-    pub fn parse(gpa: Allocator, r: *Io.Reader, limit: u32) ParseError!Request {
+    pub fn parse(gpa: Allocator, r: *Io.Reader, limits: Limits) ParseError!Request {
         // ====== Parse request line ==========================================
+        // TODO: limit request line
         const request_line = try r.takeDelimiterInclusive('\n');
 
         var it = mem.splitScalar(u8, request_line, ' ');
@@ -56,7 +63,7 @@ pub const Request = struct {
         var req = try Request.init(gpa, method, path);
 
         // ===== Parse headers ================================================
-        var n: usize = request_line.len;
+        var n: usize = 0;
         while (true) {
             const line = try r.takeDelimiter('\r') orelse break;
 
@@ -67,7 +74,7 @@ pub const Request = struct {
 
             n += line.len + 2;
 
-            if (n >= limit) {
+            if (n >= limits.max_size_headers) {
                 return Error.BadRequest;
             }
 
@@ -90,6 +97,7 @@ pub const Request = struct {
         }
 
         // ====== Parse body ==================================================
+        // TODO: limit body
         if (req.headers.get("content-length")) |len| {
             const bytes = std.fmt.parseInt(u32, len, 10) catch
                 return Error.BadRequest;
