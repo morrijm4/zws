@@ -7,17 +7,20 @@ const Allocator = std.mem.Allocator;
 const Request = http.Request;
 const Response = http.Response;
 
-fn after(req: Request, res: *Response, context: *anyopaque) anyerror!void {
+fn after(
+    io: Io,
+    gpa: Allocator,
+    req: Request,
+    res: *Response,
+    ctx: *anyopaque,
+) anyerror!void {
     if (res.code != .NotFound) {
         return;
     }
 
-    const ctx: *Context = @ptrCast(@alignCast(context));
+    const assets_path: *[]const u8 = @ptrCast(@alignCast(ctx));
 
-    const gpa = ctx.gpa;
-    const io = ctx.io;
-
-    var file_path = try path.join(gpa, &.{ ".", ctx.path, req.path.buf });
+    var file_path = try path.join(gpa, &.{ ".", assets_path.*, req.path.buf });
 
     if (std.mem.endsWith(u8, req.path.buf, "/")) {
         file_path = try path.join(gpa, &.{ file_path, "index.html" });
@@ -26,7 +29,7 @@ fn after(req: Request, res: *Response, context: *anyopaque) anyerror!void {
     const file = Io.Dir.cwd().openFile(io, file_path, .{}) catch {
         return http.Error.NotFound;
     };
-    defer file.close(ctx.io);
+    defer file.close(io);
 
     const stat = try file.stat(io);
 
@@ -43,15 +46,9 @@ fn after(req: Request, res: *Response, context: *anyopaque) anyerror!void {
     res.* = response;
 }
 
-pub const Context = struct {
-    path: []const u8,
-    io: Io,
-    gpa: Allocator,
-};
-
-pub fn init(ctx: *Context) plug.Plugin {
+pub fn init(comptime assets_path: []const u8) plug.Plugin {
     return .{
-        .ctx = ctx,
+        .userdata = @ptrCast(@constCast(&assets_path)),
         .before = null,
         .after = &after,
     };

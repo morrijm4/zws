@@ -6,10 +6,10 @@ const Request = http.Request;
 const Response = http.Response;
 
 pub const Plugin = struct {
-    ctx: *anyopaque,
+    userdata: *anyopaque,
     before: ?Before,
     after: ?After,
 };
 
-const Before = *const fn (*Request, *anyopaque) anyerror!void;
-const After = *const fn (Request, *Response, *anyopaque) anyerror!void;
+const Before = *const fn (Io, Allocator, *Request, *anyopaque) anyerror!void;
+const After = *const fn (Io, Allocator, Request, *Response, *anyopaque) anyerror!void;

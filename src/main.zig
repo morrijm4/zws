@@ -6,6 +6,7 @@ const zws = @import("zws");
 const App = zws.App;
 const Request = zws.Request;
 const Response = zws.Response;
+const static_assets = zws.static_assets;
 
 var i: u32 = 0;
 
@@ -35,12 +36,7 @@ pub fn main(init: std.process.Init) !void {
 
     var app = try App.init(arena.allocator(), .{});
 
-    var ctx: zws.static_assets.Context = .{
-        .path = "/public",
-        .io = io,
-        .gpa = gpa,
-    };
-    try app.use(zws.static_assets.init(&ctx));
+    try app.use(static_assets.init("/public"));
     try app.get("/counter", counter);
 
     try app.listen(io, "127.0.0.1:3000");

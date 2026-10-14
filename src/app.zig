@@ -121,7 +121,7 @@ const Worker = struct {
 
         for (worker.plugins) |plugin| {
             if (plugin.before) |callback| {
-                callback(&req, plugin.ctx) catch |err| {
+                callback(io, gpa, &req, plugin.userdata) catch |err| {
                     return worker.onError(err).send(writer);
                 };
             }
@@ -131,7 +131,7 @@ const Worker = struct {
 
         for (worker.plugins) |plugin| {
             if (plugin.after) |callback| {
-                callback(req, &res, plugin.ctx) catch |err| {
+                callback(io, gpa, req, &res, plugin.userdata) catch |err| {
                     return worker.onError(err).send(writer);
                 };
             }
