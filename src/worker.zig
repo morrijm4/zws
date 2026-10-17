@@ -25,6 +25,20 @@ pub const Context = struct {
     io: Io,
     arena: FixedBufferAllocator,
     worker_idx: u32,
+    handler: *Handler,
+
+    pub fn init(io: Io, buf: []u8) Context {
+        return .{
+            .io = io,
+            .arena = FixedBufferAllocator.init(buf),
+            .worker_idx = 0,
+            .handler = undefined,
+        };
+    }
+
+    pub fn getUserData(ctx: *Context, U: type) *U {
+        return ctx.handler.getUserData(U);
+    }
 };
 
 pub fn init(
@@ -77,18 +91,20 @@ pub fn serve(self: *Worker, io: Io, stream: Stream) void {
         const on_request = switch (handler.kind) {
             .global => |*h| h.on_request,
             .prefixed => |*h| h.on_request,
-            .get => |*h| h.on_request,
-            .head => |*h| h.on_request,
-            .post => |*h| h.on_request,
-            .put => |*h| h.on_request,
-            .patch => |*h| h.on_request,
-            .delete => |*h| h.on_request,
-            .option => |*h| h.on_request,
-            .connect => |*h| h.on_request,
+            .get,
+            .head,
+            .post,
+            .put,
+            .patch,
+            .delete,
+            .option,
+            .connect,
+            => |*h| h.on_request,
         };
 
         if (on_request) |func| {
-            func(handler, &req, &res, &self.ctx) catch |err| {
+            self.ctx.handler = handler;
+            func(&req, &res, &self.ctx) catch |err| {
                 return self.onError(err, &req, &res).send(writer);
             };
         }
@@ -116,7 +132,7 @@ fn onError(self: *Worker, err: anyerror, req: *Request, res: *Response) Response
             .connect => |*h| h.on_error,
         };
 
-        if (on_error) |func| func(handler, req, res, &self.ctx) catch @panic("TODO");
+        if (on_error) |func| func(req, res, &self.ctx) catch @panic("TODO");
     }
 
     return Response.fromError(gpa, err);

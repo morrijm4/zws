@@ -15,12 +15,10 @@ const Request = http.Request;
 const Response = http.Response;
 
 fn log(
-    handler: *Handler,
     req: *Request,
     res: *Response,
     ctx: *Context,
 ) anyerror!void {
-    _ = handler;
     const gpa = ctx.arena.allocator();
     const buf = try gpa.alloc(u8, 4096);
     defer gpa.free(buf);

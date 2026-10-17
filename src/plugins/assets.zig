@@ -17,8 +17,7 @@ const Prefixed = handlers.Prefixed;
 const work = @import("../worker.zig");
 const Context = work.Context;
 
-fn callback(
-    handler: *Handler,
+fn onRequest(
     req: *Request,
     res: *Response,
     ctx: *Context,
@@ -27,7 +26,7 @@ fn callback(
         return;
     }
 
-    const req_path = switch (handler.kind) {
+    const req_path = switch (ctx.handler.kind) {
         .global => req.path.buf,
         .prefixed => |h| blk: {
             const end = h.prefix.len;
@@ -36,7 +35,7 @@ fn callback(
         else => unreachable,
     };
 
-    const assets_path: *[]const u8 = @ptrCast(@alignCast(handler.getUserdata()));
+    const assets_path = ctx.getUserData([]const u8);
 
     const gpa = ctx.arena.allocator();
     var file_path = try path.join(gpa, &.{
@@ -75,6 +74,6 @@ fn callback(
 pub fn init(comptime assets_path: []const u8) Interface {
     return .{
         .userdata = @ptrCast(@constCast(&assets_path)),
-        .on_request = &callback,
+        .on_request = &onRequest,
     };
 }

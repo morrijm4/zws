@@ -66,12 +66,7 @@ pub fn listen(
     var server = try ip.listen(io, .{ .reuse_address = true });
 
     const buf = try gpa.alloc(u8, app.opts.worker_arena_size);
-    const ctx: Worker.Context = .{
-        .io = io,
-        .arena = FixedBufferAllocator.init(buf),
-        .worker_idx = 0,
-    };
-
+    const ctx = Worker.Context.init(io, buf);
     var worker = Worker.init(ctx, &app.handlers, app.opts);
 
     while (true) {

@@ -82,7 +82,6 @@ pub fn add(
 }
 
 pub const Callback = *const fn (
-    *Handler,
     *Request,
     *Response,
     *Context,
@@ -112,8 +111,8 @@ pub const Handler = struct {
     priority: u32,
     kind: Kind,
 
-    pub fn getUserdata(self: *Handler) *anyopaque {
-        return switch (self.kind) {
+    pub fn getUserData(self: *Handler, U: type) *U {
+        const userdata = switch (self.kind) {
             .global => |h| h.userdata,
             .prefixed => |h| h.userdata,
             .get,
@@ -126,6 +125,8 @@ pub const Handler = struct {
             .option,
             => |h| h.userdata,
         };
+
+        return @ptrCast(@alignCast(userdata));
     }
 
     pub const Kind = union(enum) {
