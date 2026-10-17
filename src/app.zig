@@ -1,25 +1,30 @@
 const std = @import("std");
-const http = @import("http.zig");
-const plugin = @import("plugins/plugin.zig");
 const Io = std.Io;
 const net = Io.net;
 const Allocator = std.mem.Allocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const IpAddress = net.IpAddress;
 const Stream = net.Stream;
+const assert = std.debug.assert;
+
+const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
-const assert = std.debug.assert;
+
+const Worker = @import("worker.zig").Worker;
+
+const Handlers = @import("handler.zig");
+const Handler = Handlers.Handler;
+const Global = Handlers.Global;
+const Prefixed = Handlers.Prefixed;
+const Exact = Handlers.Exact;
 
 pub const App = @This();
 
-opts: Options,
-gpa: Allocator,
 handlers: Handlers,
-plugins: std.ArrayList(plugin.Interface),
-worker_arenas: []FixedBufferAllocator,
+opts: Options,
 
-const Options = struct {
+pub const Options = struct {
     client_max_size_url: u32 = 1024 * 2,
     client_max_size_headers: u32 = 1024 * 8,
     client_max_size_body: u32 = 1024 * 1024,
@@ -27,7 +32,7 @@ const Options = struct {
     workers: u32 = 1,
 };
 
-pub fn init(gpa: Allocator, opts: Options) Allocator.Error!App {
+pub fn init(opts: Options) App {
     const max_request_size =
         opts.client_max_size_url +
         opts.client_max_size_headers +
@@ -35,209 +40,200 @@ pub fn init(gpa: Allocator, opts: Options) Allocator.Error!App {
 
     assert(opts.worker_arena_size >= max_request_size);
 
-    const arenas = try gpa.alloc(FixedBufferAllocator, opts.workers);
-
-    for (arenas) |*a| {
-        const buf = try gpa.alloc(u8, opts.worker_arena_size);
-        a.* = FixedBufferAllocator.init(buf);
-    }
-
     return .{
         .opts = opts,
-        .gpa = gpa,
-        .plugins = .empty,
-        .worker_arenas = arenas,
-        .handlers = .init(gpa),
+        .handlers = .init(),
     };
 }
 
-pub fn deinit(app: *App) void {
-    app.handlers.gets.deinit(app.gpa);
-    app.handlers.heads.deinit(app.gpa);
-    app.handlers.posts.deinit(app.gpa);
-    app.handlers.puts.deinit(app.gpa);
-    app.handlers.patchs.deinit(app.gpa);
-    app.handlers.deletes.deinit(app.gpa);
-    app.handlers.options.deinit(app.gpa);
-    app.handlers.connects.deinit(app.gpa);
-    app.plugins.deinit(app.gpa);
-
-    for (app.worker_arenas) |arena| {
-        app.gpa.free(arena.buffer);
-    }
-    app.gpa.free(app.worker_arenas);
+pub fn deinit(app: *App, gpa: Allocator) void {
+    app.handlers.deinit(gpa);
 }
 
 const ListenError =
     IpAddress.ListenError ||
     IpAddress.ParseLiteralError ||
-    net.Server.AcceptError;
+    net.Server.AcceptError ||
+    Allocator.Error;
 
-pub fn listen(app: *App, io: Io, address: []const u8) ListenError!noreturn {
+pub fn listen(
+    app: *App,
+    io: Io,
+    gpa: Allocator,
+    address: []const u8,
+) ListenError!noreturn {
     const ip = try IpAddress.parseLiteral(address);
     var server = try ip.listen(io, .{ .reuse_address = true });
 
-    var worker = Worker.init(&app.handlers, app.plugins.items, app.worker_arenas[0]);
+    const buf = try gpa.alloc(u8, app.opts.worker_arena_size);
+    const ctx: Worker.Context = .{
+        .io = io,
+        .arena = FixedBufferAllocator.init(buf),
+        .worker_idx = 0,
+    };
+
+    var worker = Worker.init(ctx, &app.handlers, app.opts);
 
     while (true) {
         const stream = try server.accept(io);
-        worker.serve(io, stream, app.opts);
+        worker.serve(io, stream);
     }
 }
-const Worker = struct {
-    arena: FixedBufferAllocator,
-    plugins: []const plugin.Interface,
-    handlers: *Handlers,
 
-    fn init(
-        handlers: *Handlers,
-        plugins: []const plugin.Interface,
-        arena: FixedBufferAllocator,
-    ) Worker {
-        return .{
-            .arena = arena,
-            .plugins = plugins,
-            .handlers = handlers,
-        };
-    }
+pub fn use(
+    app: *App,
+    gpa: Allocator,
+    handler: Handler.Interface,
+) Allocator.Error!void {
+    try app.handlers.add(gpa, .{
+        .global = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+        },
+    });
+}
 
-    fn serve(worker: *Worker, io: Io, stream: Stream, opts: Options) void {
-        defer worker.arena.reset();
-        defer stream.close(io);
-
-        var req_buffer: [1024 * 4]u8 = undefined;
-        var res_buffer: [1024 * 4]u8 = undefined;
-        var stream_reader = stream.reader(io, &req_buffer);
-        var stream_writer = stream.writer(io, &res_buffer);
-
-        const reader = &stream_reader.interface;
-        const writer = &stream_writer.interface;
-
-        const gpa = worker.arena.allocator();
-
-        const limits: Request.Limits = .{
-            .max_size_url = opts.client_max_size_url,
-            .max_size_headers = opts.client_max_size_headers,
-            .max_size_body = opts.client_max_size_body,
-        };
-
-        var req = Request.parse(gpa, reader, limits) catch |err| {
-            return worker.onError(err).send(writer);
-        };
-
-        for (worker.plugins) |plug| {
-            if (plug.before) |callback| {
-                callback(io, gpa, &req, plug.userdata) catch |err| {
-                    return worker.onError(err).send(writer);
-                };
-            }
-        }
-
-        var res = worker.onRequest(io, req);
-
-        for (worker.plugins) |plug| {
-            if (plug.after) |callback| {
-                callback(io, gpa, req, &res, plug.userdata) catch |err| {
-                    return worker.onError(err).send(writer);
-                };
-            }
-        }
-
-        res.send(writer);
-    }
-
-    fn onRequest(worker: *Worker, io: Io, req: Request) Response {
-        const handler = switch (req.method) {
-            .GET => worker.handlers.gets.get(req.path.buf),
-            .HEAD => worker.handlers.heads.get(req.path.buf),
-            .POST => worker.handlers.posts.get(req.path.buf),
-            .PUT => worker.handlers.puts.get(req.path.buf),
-            .PATCH => worker.handlers.patchs.get(req.path.buf),
-            .DELETE => worker.handlers.deletes.get(req.path.buf),
-            .OPTIONS => worker.handlers.options.get(req.path.buf),
-            .CONNECT => worker.handlers.connects.get(req.path.buf),
-        };
-
-        if (handler) |handle| {
-            return handle(io, worker.arena.allocator(), req) catch |err| {
-                return worker.onError(err);
-            };
-        }
-
-        return worker.onError(http.Error.NotFound);
-    }
-
-    fn onError(worker: *Worker, err: anyerror) Response {
-        const gpa = worker.arena.allocator();
-        return Response.fromError(gpa, err);
-    }
-};
-
-pub fn use(app: *App, plug: plugin.Interface) Allocator.Error!void {
-    try app.plugins.append(app.gpa, plug);
+pub fn usePrefixed(
+    app: *App,
+    gpa: Allocator,
+    prefix: []const u8,
+    handler: Handler.Interface,
+) Allocator.Error!void {
+    try app.handlers.add(gpa, .{
+        .prefixed = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .prefix = prefix,
+        },
+    });
 }
 
 pub fn get(
     app: *App,
+    gpa: Allocator,
     path: []const u8,
-    handler: Handler,
+    handler: Handler.Interface,
 ) Allocator.Error!void {
-    try app.handlers.gets.put(path, handler);
+    try app.handlers.add(gpa, .{
+        .get = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
+}
+
+pub fn head(
+    app: *App,
+    gpa: Allocator,
+    path: []const u8,
+    handler: Handler.Interface,
+) Allocator.Error!void {
+    try app.handlers.add(gpa, .{
+        .head = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
 }
 
 pub fn post(
     app: *App,
+    gpa: Allocator,
     path: []const u8,
-    handler: Handler,
+    handler: Handler.Interface,
 ) Allocator.Error!void {
-    try app.handlers.posts.put(path, handler);
+    try app.handlers.add(gpa, .{
+        .post = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
 }
+
 pub fn put(
     app: *App,
+    gpa: Allocator,
     path: []const u8,
-    handler: Handler,
+    handler: Handler.Interface,
 ) Allocator.Error!void {
-    try app.handlers.puts.put(path, handler);
+    try app.handlers.add(gpa, .{
+        .put = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
 }
 
 pub fn patch(
     app: *App,
+    gpa: Allocator,
     path: []const u8,
-    handler: Handler,
+    handler: Handler.Interface,
 ) Allocator.Error!void {
-    try app.handlers.patchs.put(path, handler);
+    try app.handlers.add(gpa, .{
+        .patch = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
 }
 
 pub fn delete(
     app: *App,
+    gpa: Allocator,
     path: []const u8,
-    handler: Handler,
+    handler: Handler.Interface,
 ) Allocator.Error!void {
-    try app.handlers.deletes.put(path, handler);
+    try app.handlers.add(gpa, .{
+        .delete = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
 }
 
-const Handler = *const fn (Io, Allocator, Request) anyerror!Response;
+pub fn option(
+    app: *App,
+    gpa: Allocator,
+    path: []const u8,
+    handler: Handler.Interface,
+) Allocator.Error!void {
+    try app.handlers.add(gpa, .{
+        .option = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
+}
 
-const Handlers = struct {
-    gets: std.StringHashMap(Handler),
-    heads: std.StringHashMap(Handler),
-    posts: std.StringHashMap(Handler),
-    puts: std.StringHashMap(Handler),
-    patchs: std.StringHashMap(Handler),
-    deletes: std.StringHashMap(Handler),
-    options: std.StringHashMap(Handler),
-    connects: std.StringHashMap(Handler),
-
-    fn init(gpa: Allocator) Handlers {
-        return .{
-            .gets = .init(gpa),
-            .heads = .init(gpa),
-            .posts = .init(gpa),
-            .puts = .init(gpa),
-            .patchs = .init(gpa),
-            .deletes = .init(gpa),
-            .options = .init(gpa),
-            .connects = .init(gpa),
-        };
-    }
-};
+pub fn connect(
+    app: *App,
+    gpa: Allocator,
+    path: []const u8,
+    handler: Handler.Interface,
+) Allocator.Error!void {
+    try app.handlers.add(gpa, .{
+        .connect = .{
+            .on_request = handler.on_request,
+            .on_error = handler.on_error,
+            .userdata = handler.userdata,
+            .path = path,
+        },
+    });
+}

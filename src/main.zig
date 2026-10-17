@@ -8,23 +8,7 @@ const App = zws.App;
 const Request = zws.Request;
 const Response = zws.Response;
 const assets = zws.assets;
-
-var i: u32 = 0;
-
-fn counter(io: Io, gpa: Allocator, req: Request) anyerror!Response {
-    _ = io;
-    _ = req;
-    i += 1;
-
-    var res = try Response.init(gpa, .Ok);
-
-    res.body = try std.fmt.allocPrint(gpa, "{d}", .{i});
-    const len = try std.fmt.allocPrint(gpa, "{d}", .{res.body.len});
-    try res.headers.put("Content-Type", "text/plain");
-    try res.headers.put("Content-Length", len);
-
-    return res;
-}
+const logger = zws.logger;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -33,10 +17,11 @@ pub fn main(init: std.process.Init) !void {
     const buf = try gpa.alloc(u8, 1024 * 1024 * 16); // 16 MB
     defer gpa.free(buf);
 
-    var arena = FixedBufferAllocator.init(buf);
+    var fba = FixedBufferAllocator.init(buf);
+    const arena = fba.allocator();
 
-    var app = try App.init(arena.allocator(), .{});
-    try app.use(assets.init("/public"));
-    try app.get("/counter", counter);
-    try app.listen(io, "127.0.0.1:3000");
+    var app = App.init(.{});
+    try app.use(arena, assets.init("/public"));
+    try app.use(arena, logger.init());
+    try app.listen(io, gpa, "127.0.0.1:3000");
 }
