@@ -4,16 +4,16 @@ const path = std.fs.path;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const assert = std.debug.assert;
 
-const http = @import("../http.zig");
+const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
 
-const Controller = @import("../controller.zig");
+const Controller = @import("controller.zig");
 const Interface = Controller.Interface;
 const Global = Controller.Global;
 const Prefixed = Controller.Prefixed;
 
-const work = @import("../worker.zig");
+const work = @import("worker.zig");
 const Context = work.Context;
 
 fn onRequest(

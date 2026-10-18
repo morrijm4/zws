@@ -3,13 +3,13 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
-const Controller = @import("../controller.zig");
+const Controller = @import("controller.zig");
 
-const work = @import("../worker.zig");
+const work = @import("worker.zig");
 const Worker = work.Worker;
 const Context = Worker.Context;
 
-const http = @import("../http.zig");
+const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
 

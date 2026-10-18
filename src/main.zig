@@ -13,6 +13,19 @@ const assets = zws.assets;
 const logger = zws.logger;
 
 const CounterController = struct {
+    fn init(gpa: Allocator) Allocator.Error!Controller.Interface {
+        const count = try gpa.create(u32);
+        count.* = 0;
+        return .{
+            .userdata = count,
+            .on_request = &onRequest,
+        };
+    }
+
+    fn deinit(self: Controller.Interface, gpa: Allocator) void {
+        gpa.free(self.userdata);
+    }
+
     fn onRequest(
         req: *Request,
         res: *Response,
@@ -32,19 +45,6 @@ const CounterController = struct {
         }));
 
         count.* += 1;
-    }
-
-    fn init(gpa: Allocator) Allocator.Error!Controller.Interface {
-        const count = try gpa.create(u32);
-        count.* = 0;
-        return .{
-            .userdata = count,
-            .on_request = &onRequest,
-        };
-    }
-
-    fn deinit(self: Controller.Interface, gpa: Allocator) void {
-        gpa.free(self.userdata);
     }
 };
 
