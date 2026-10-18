@@ -8,47 +8,47 @@ const assert = std.debug.assert;
 const app = @import("app.zig");
 const Options = app.Options;
 
-const Handlers = @import("handler.zig");
-const Handler = Handlers.Handler;
-
 const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
 
+const Controller = @import("controller.zig");
+const Pipeline = @import("pipeline.zig");
+
 pub const Worker = @This();
 
 ctx: Context,
-handlers: *Handlers,
+pipeline: *Pipeline,
 opts: Options,
 
 pub const Context = struct {
     io: Io,
     arena: FixedBufferAllocator,
     worker_idx: u32,
-    handler: *Handler,
+    controller: *Controller,
 
     pub fn init(io: Io, buf: []u8) Context {
         return .{
             .io = io,
             .arena = FixedBufferAllocator.init(buf),
             .worker_idx = 0,
-            .handler = undefined,
+            .controller = undefined,
         };
     }
 
     pub fn getUserData(ctx: *Context, U: type) *U {
-        return ctx.handler.getUserData(U);
+        return ctx.controller.getUserData(U);
     }
 };
 
 pub fn init(
     ctx: Context,
-    handlers: *Handlers,
+    pipeline: *Pipeline,
     opts: Options,
 ) Worker {
     return .{
         .ctx = ctx,
-        .handlers = handlers,
+        .pipeline = pipeline,
         .opts = opts,
     };
 }
@@ -83,12 +83,12 @@ pub fn serve(self: *Worker, io: Io, stream: Stream) void {
         return Response.fromError(gpa, err).send(writer);
     };
 
-    const pipeline = self.buildPipeline(&req) catch |err| {
+    const pipeline = self.pipeline.build(gpa, &req) catch |err| {
         return self.onError(err, &req, &res).send(writer);
     };
 
-    for (pipeline) |*handler| {
-        const on_request = switch (handler.kind) {
+    for (pipeline) |*controller| {
+        const on_request = switch (controller.kind) {
             .global => |*h| h.on_request,
             .prefixed => |*h| h.on_request,
             .get,
@@ -103,7 +103,7 @@ pub fn serve(self: *Worker, io: Io, stream: Stream) void {
         };
 
         if (on_request) |func| {
-            self.ctx.handler = handler;
+            self.ctx.controller = controller;
             func(&req, &res, &self.ctx) catch |err| {
                 return self.onError(err, &req, &res).send(writer);
             };
@@ -116,10 +116,10 @@ pub fn serve(self: *Worker, io: Io, stream: Stream) void {
 fn onError(self: *Worker, err: anyerror, req: *Request, res: *Response) Response {
     self.ctx.arena.reset();
     const gpa = self.ctx.arena.allocator();
-    const pipeline = self.buildPipeline(req) catch @panic("OOM onError");
+    const pipeline = self.pipeline.build(gpa, req) catch @panic("OOM onError");
 
-    for (pipeline) |*handler| {
-        const on_error = switch (handler.kind) {
+    for (pipeline) |*controller| {
+        const on_error = switch (controller.kind) {
             .global => |*h| h.on_error,
             .prefixed => |*h| h.on_error,
             .get => |*h| h.on_error,
@@ -136,39 +136,4 @@ fn onError(self: *Worker, err: anyerror, req: *Request, res: *Response) Response
     }
 
     return Response.fromError(gpa, err);
-}
-
-fn buildPipeline(self: *Worker, req: *Request) Allocator.Error![]Handler {
-    const gpa = self.ctx.arena.allocator();
-
-    var handlers = try self.handlers.global.clone(gpa);
-
-    for (self.handlers.prefixed.items) |handler| {
-        switch (handler.kind) {
-            .prefixed => |h| {
-                if (std.mem.startsWith(u8, req.path.buf, h.prefix)) {
-                    try handlers.append(gpa, handler);
-                }
-            },
-            else => unreachable,
-        }
-    }
-
-    const maybe_handler = switch (req.method) {
-        .GET => self.handlers.gets.get(req.path.buf),
-        .HEAD => self.handlers.heads.get(req.path.buf),
-        .POST => self.handlers.posts.get(req.path.buf),
-        .PUT => self.handlers.puts.get(req.path.buf),
-        .PATCH => self.handlers.patchs.get(req.path.buf),
-        .DELETE => self.handlers.deletes.get(req.path.buf),
-        .OPTIONS => self.handlers.options.get(req.path.buf),
-        .CONNECT => self.handlers.connects.get(req.path.buf),
-    };
-
-    if (maybe_handler) |handler| {
-        try handlers.append(gpa, handler);
-    }
-
-    std.mem.sort(Handler, handlers.items, {}, Handler.lessThan);
-    return handlers.items;
 }

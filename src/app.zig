@@ -11,17 +11,17 @@ const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
 
-const Worker = @import("worker.zig").Worker;
+const Controller = @import("controller.zig");
+const Global = Controller.Global;
+const Prefixed = Controller.Prefixed;
+const Exact = Controller.Exact;
 
-const Handlers = @import("handler.zig");
-const Handler = Handlers.Handler;
-const Global = Handlers.Global;
-const Prefixed = Handlers.Prefixed;
-const Exact = Handlers.Exact;
+const Worker = @import("worker.zig");
+const Pipeline = @import("pipeline.zig");
 
 pub const App = @This();
 
-handlers: Handlers,
+pipeline: Pipeline,
 opts: Options,
 
 pub const Options = struct {
@@ -42,12 +42,12 @@ pub fn init(opts: Options) App {
 
     return .{
         .opts = opts,
-        .handlers = .init(),
+        .pipeline = .init(),
     };
 }
 
 pub fn deinit(app: *App, gpa: Allocator) void {
-    app.handlers.deinit(gpa);
+    app.pipeline.deinit(gpa);
 }
 
 const ListenError =
@@ -67,7 +67,7 @@ pub fn listen(
 
     const buf = try gpa.alloc(u8, app.opts.worker_arena_size);
     const ctx = Worker.Context.init(io, buf);
-    var worker = Worker.init(ctx, &app.handlers, app.opts);
+    var worker = Worker.init(ctx, &app.pipeline, app.opts);
 
     while (true) {
         const stream = try server.accept(io);
@@ -78,13 +78,13 @@ pub fn listen(
 pub fn use(
     app: *App,
     gpa: Allocator,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .global = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
         },
     });
 }
@@ -93,13 +93,13 @@ pub fn usePrefixed(
     app: *App,
     gpa: Allocator,
     prefix: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .prefixed = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .prefix = prefix,
         },
     });
@@ -109,13 +109,13 @@ pub fn get(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .get = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });
@@ -125,13 +125,13 @@ pub fn head(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .head = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });
@@ -141,13 +141,13 @@ pub fn post(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .post = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });
@@ -157,13 +157,13 @@ pub fn put(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .put = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });
@@ -173,13 +173,13 @@ pub fn patch(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .patch = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });
@@ -189,13 +189,13 @@ pub fn delete(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .delete = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });
@@ -205,13 +205,13 @@ pub fn option(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .option = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });
@@ -221,13 +221,13 @@ pub fn connect(
     app: *App,
     gpa: Allocator,
     path: []const u8,
-    handler: Handler.Interface,
+    controller: Controller.Interface,
 ) Allocator.Error!void {
-    try app.handlers.add(gpa, .{
+    try app.pipeline.add(gpa, .{
         .connect = .{
-            .on_request = handler.on_request,
-            .on_error = handler.on_error,
-            .userdata = handler.userdata,
+            .on_request = controller.on_request,
+            .on_error = controller.on_error,
+            .userdata = controller.userdata,
             .path = path,
         },
     });

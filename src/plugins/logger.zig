@@ -3,8 +3,7 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
-const handlers = @import("../handler.zig");
-const Handler = handlers.Handler;
+const Controller = @import("../controller.zig");
 
 const work = @import("../worker.zig");
 const Worker = work.Worker;
@@ -37,7 +36,7 @@ fn log(
     try w.flush();
 }
 
-pub fn init() Handler.Interface {
+pub fn init() Controller.Interface {
     return .{
         .on_request = &log,
         .on_error = &log,

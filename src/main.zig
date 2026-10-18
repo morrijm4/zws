@@ -8,10 +8,9 @@ const App = zws.App;
 const Request = zws.Request;
 const Response = zws.Response;
 const Context = zws.Context;
+const Controller = zws.Controller;
 const assets = zws.assets;
 const logger = zws.logger;
-const handler = zws.handler;
-const Handler = handler.Handler;
 
 const CounterController = struct {
     fn onRequest(
@@ -35,7 +34,7 @@ const CounterController = struct {
         count.* += 1;
     }
 
-    fn init(gpa: Allocator) Allocator.Error!Handler.Interface {
+    fn init(gpa: Allocator) Allocator.Error!Controller.Interface {
         const count = try gpa.create(u32);
         count.* = 0;
         return .{
@@ -44,7 +43,7 @@ const CounterController = struct {
         };
     }
 
-    fn deinit(self: Handler.Interface, gpa: Allocator) void {
+    fn deinit(self: Controller.Interface, gpa: Allocator) void {
         gpa.free(self.userdata);
     }
 };
@@ -61,7 +60,7 @@ pub fn main(init: std.process.Init) !void {
 
     var app = App.init(.{});
     try app.get(arena, "/counter", try CounterController.init(arena));
-    try app.use(arena, assets.init("/public"));
+    try app.use(arena, assets.init("./public"));
     try app.use(arena, logger.init());
     try app.listen(io, arena, "127.0.0.1:3000");
 }
