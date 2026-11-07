@@ -1,0 +1,7 @@
+.{
+    .name = .static_assets,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.16.0",
+    .paths = .{""},
+    .fingerprint = 0xf2d4558da0203245,
+}
