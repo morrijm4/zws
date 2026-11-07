@@ -21,7 +21,7 @@ fn onRequest(
     res: *Response,
     ctx: *Context,
 ) anyerror!void {
-    if (res.code != .NotFound) {
+    if (res.code != .not_found) {
         return;
     }
 
@@ -47,14 +47,14 @@ fn onRequest(
     }
 
     const file = Io.Dir.cwd().openFile(ctx.io, file_path, .{}) catch {
-        res.* = try Response.init(gpa, .NotFound);
+        res.* = try Response.init(gpa, .not_found);
         return;
     };
     defer file.close(ctx.io);
 
     const stat = try file.stat(ctx.io);
 
-    var response = try Response.init(gpa, .Ok);
+    var response = try Response.init(gpa, .ok);
     try response.headers.put("Content-Type", "text/html");
     try response.headers.put("Content-Length", try std.fmt.allocPrint(gpa, "{d}", .{
         stat.size,

@@ -34,10 +34,9 @@ const CounterController = struct {
         _ = req;
 
         const count = ctx.getUserData(u32);
-
         const gpa = ctx.arena.allocator();
 
-        res.code = .Ok;
+        res.code = .ok;
         res.body = try std.fmt.allocPrint(gpa, "{d}\n", .{count.*});
         try res.headers.put("Content-Type", "text/plain");
         try res.headers.put("Content-Length", try std.fmt.allocPrint(gpa, "{d}", .{

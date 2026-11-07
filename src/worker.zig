@@ -24,14 +24,14 @@ opts: Options,
 pub const Context = struct {
     io: Io,
     arena: FixedBufferAllocator,
-    worker_idx: u32,
+    worker_id: u32,
     controller: *Controller,
 
     pub fn init(io: Io, buf: []u8) Context {
         return .{
             .io = io,
             .arena = FixedBufferAllocator.init(buf),
-            .worker_idx = 0,
+            .worker_id = 0,
             .controller = undefined,
         };
     }
@@ -78,7 +78,7 @@ pub fn serve(self: *Worker, io: Io, stream: Stream) void {
         return Response.fromError(gpa, err).send(writer);
     };
 
-    var res = Response.init(gpa, .NotFound) catch |err| {
+    var res = Response.init(gpa, .not_found) catch |err| {
         self.ctx.arena.reset();
         return Response.fromError(gpa, err).send(writer);
     };

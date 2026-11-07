@@ -18,22 +18,13 @@ fn log(
     res: *Response,
     ctx: *Context,
 ) anyerror!void {
-    const gpa = ctx.arena.allocator();
-    const buf = try gpa.alloc(u8, 4096);
-    defer gpa.free(buf);
-
-    const stdout = Io.File.stdout();
-    var stdout_writer = stdout.writer(ctx.io, buf);
-    const w = &stdout_writer.interface;
-
-    try w.print("{d} {s} {s} RSS {d} Worker {d}\n", .{
+    std.log.info("{d} {s} {s} RSS {d} Worker {d}", .{
         @intFromEnum(res.code),
         @tagName(req.method),
         req.path.buf,
         ctx.arena.end_index,
-        ctx.worker_idx,
+        ctx.worker_id,
     });
-    try w.flush();
 }
 
 pub fn init() Controller.Interface {

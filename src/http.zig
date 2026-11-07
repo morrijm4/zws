@@ -165,11 +165,11 @@ pub const Response = struct {
 
     pub fn fromError(gpa: Allocator, err: anyerror) Response {
         return switch (err) {
-            Error.BadRequest => Response.init(gpa, .BadRequest),
-            Error.NotFound => Response.init(gpa, .NotFound),
-            Error.NotImplemented => Response.init(gpa, .NotImplemented),
+            Error.BadRequest => Response.init(gpa, .bad_request),
+            Error.NotFound => Response.init(gpa, .not_found),
+            Error.NotImplemented => Response.init(gpa, .not_implemented),
             // TODO: Get rid of this "else"
-            else => Response.init(gpa, .InternalServerError),
+            else => Response.init(gpa, .internal_server_error),
         } catch @panic("Unable to allocate error response");
     }
 
@@ -198,14 +198,14 @@ pub const Response = struct {
 
     const Code = enum(u16) {
         // Success
-        Ok = 200,
+        ok = 200,
 
         // Client error
-        BadRequest = 400,
-        NotFound = 404,
+        bad_request = 400,
+        not_found = 404,
 
         // Server error
-        InternalServerError = 500,
-        NotImplemented = 501,
+        internal_server_error = 500,
+        not_implemented = 501,
     };
 };

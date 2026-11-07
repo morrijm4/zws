@@ -20,7 +20,7 @@ deletes: std.StringHashMapUnmanaged(Controller),
 options: std.StringHashMapUnmanaged(Controller),
 connects: std.StringHashMapUnmanaged(Controller),
 
-index: u32,
+id: u32,
 
 pub fn init() Pipeline {
     return .{
@@ -34,7 +34,7 @@ pub fn init() Pipeline {
         .deletes = .empty,
         .options = .empty,
         .connects = .empty,
-        .index = 0,
+        .id = 0,
     };
 }
 
@@ -57,11 +57,11 @@ pub fn add(
     kind: Controller.Kind,
 ) Allocator.Error!void {
     const controller: Controller = .{
-        .priority = self.index,
+        .priority = self.id,
         .kind = kind,
     };
 
-    self.index += 1;
+    self.id += 1;
 
     try switch (kind) {
         .global => self.global.append(gpa, controller),
