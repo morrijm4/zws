@@ -18,7 +18,7 @@ fn log(
     ctx: *Context,
 ) anyerror!void {
     std.log.info("{d} {s} {s} RSS {d} Worker {d}", .{
-        @backingInt(res.code),
+        @intFromEnum(res.code),
         @tagName(req.method),
         req.path.buf,
         ctx.arena.end_index,
