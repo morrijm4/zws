@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const http = @import("http.zig");
 const Request = http.Request;
 
-const Controller = @import("controller.zig");
+const Controller = @import("Controller.zig");
 
 pub const Pipeline = @This();
 

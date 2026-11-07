@@ -7,8 +7,8 @@ const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
 
-const work = @import("worker.zig");
-const Context = work.Context;
+const Worker = @import("Worker.zig");
+const Context = Worker.Context;
 
 pub const Controller = @This();
 

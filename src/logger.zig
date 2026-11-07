@@ -3,10 +3,9 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
-const Controller = @import("controller.zig");
+const Controller = @import("Controller.zig");
 
-const work = @import("worker.zig");
-const Worker = work.Worker;
+const Worker = @import("Worker.zig");
 const Context = Worker.Context;
 
 const http = @import("http.zig");
@@ -19,7 +18,7 @@ fn log(
     ctx: *Context,
 ) anyerror!void {
     std.log.info("{d} {s} {s} RSS {d} Worker {d}", .{
-        @intFromEnum(res.code),
+        @backingInt(res.code),
         @tagName(req.method),
         req.path.buf,
         ctx.arena.end_index,

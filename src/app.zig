@@ -11,13 +11,13 @@ const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
 
-const Controller = @import("controller.zig");
+const Controller = @import("Controller.zig");
 const Global = Controller.Global;
 const Prefixed = Controller.Prefixed;
 const Exact = Controller.Exact;
 
-const Worker = @import("worker.zig");
-const Pipeline = @import("pipeline.zig");
+const Worker = @import("Worker.zig");
+const Pipeline = @import("Pipeline.zig");
 
 pub const App = @This();
 

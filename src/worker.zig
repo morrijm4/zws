@@ -5,15 +5,15 @@ const Stream = Io.net.Stream;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 const assert = std.debug.assert;
 
-const app = @import("app.zig");
-const Options = app.Options;
+const App = @import("App.zig");
+const Options = App.Options;
 
 const http = @import("http.zig");
 const Request = http.Request;
 const Response = http.Response;
 
-const Controller = @import("controller.zig");
-const Pipeline = @import("pipeline.zig");
+const Controller = @import("Controller.zig");
+const Pipeline = @import("Pipeline.zig");
 
 pub const Worker = @This();
 
