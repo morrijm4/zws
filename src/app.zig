@@ -69,6 +69,8 @@ pub fn listen(
     const ctx = Worker.Context.init(io, buf);
     var worker = Worker.init(ctx, &app.pipeline, app.opts);
 
+    std.log.info("Listening at http://127.0.0.1:3000/", .{});
+
     while (true) {
         const stream = try server.accept(io);
         worker.serve(io, stream);
